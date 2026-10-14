@@ -1,4 +1,4 @@
 interface:
   display_name: "LuluLab 带货视频"
-  short_description: "用 LuluLab 从商品图制作原创 UGC 或剧情带货视频"
+  short_description: "从商品图制作可配置的 UGC 或剧情带货视频，支持 AI 达人或用户提供参考图"
   default_prompt: "使用 $LuluLab-Product-Video，根据我的产品图生成带货视频。"

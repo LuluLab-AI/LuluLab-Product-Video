@@ -1,5 +1,12 @@
 # Changelog
 
+## v8.3.0 — 2026-10-14
+
+- List every configurable option in the confirmation table and mark defaults and current selections.
+- Support AI-generated or user-provided creator references; keep cost disclosure outside the table.
+- Refresh skill, UI, repository, and bilingual guide descriptions.
+
+
 ## v8.0.0 — 2026-10-14
 
 - Publish the LuluLab-first UGC and story video workflow, with SalesVideoPromptV2 prompts, ImageGenV2 creator references, and VideoGenV2 as the default video path.
