@@ -1,5 +1,13 @@
 # Changelog
 
+## v8.4.0 — 2026-10-14
+
+- Always generate video prompts through SalesVideoPromptV2; remove prompt-source choice.
+- Add optional custom creative requirements and pass them into the workflow metaprompt.
+- Show product name, selling points, market, and audience separately from configurable generation settings.
+- Update skill and UI descriptions and bilingual guides.
+
+
 ## v8.3.0 — 2026-10-14
 
 - List every configurable option in the confirmation table and mark defaults and current selections.
