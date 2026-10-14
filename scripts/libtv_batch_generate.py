@@ -7,7 +7,6 @@ import argparse
 import json
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -195,14 +194,12 @@ def run_nodes_parallel(
 ) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
     completed: dict[int, dict[str, Any]] = {}
     errors: dict[int, str] = {}
-    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(nodes)))) as pool:
-        futures = {pool.submit(client.run_video_node, project_uuid, node): segment for segment, node in nodes.items()}
-        for future in as_completed(futures):
-            segment_id = futures[future]
-            try:
-                completed[segment_id] = extract_task(future.result())
-            except (OSError, ValueError, LibTVBatchError) as exc:
-                errors[segment_id] = str(exc)
+    for segment_id, node in sorted(nodes.items()):
+        try:
+            completed[segment_id] = extract_task(client.run_video_node(project_uuid, node))
+        except (OSError, ValueError, LibTVBatchError) as exc:
+            errors[segment_id] = str(exc)
+            break
     return completed, errors
 
 
@@ -249,7 +246,7 @@ def main() -> int:
         data = load_job(job_path)
         from quality_gate import validate_job
         validate_job(data)  # plan-only also reports invalid creative contracts.
-        model = video_cli.libtv_model_name(str(data.get("videoModel", "seedance-2-fast")))
+        model = video_cli.libtv_model_name(str(data.get("videoModel", video_cli.DEFAULT_MODEL)))
         plans: list[dict[str, Any]] = []
         for segment in data["segments"]:
             files = []

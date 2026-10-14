@@ -5,7 +5,24 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export class LuluLabError extends Error {}
+export class LuluLabError extends Error {
+  constructor(message, code = 'LULULAB_CLI_FAILED') { super(message); this.code = code; }
+}
+
+function remoteErrorCode(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 3) return null;
+  const fields = ['errorCode', 'error_code', 'code', 'error', 'message', 'detail', 'reason'];
+  const evidence = fields.map(key => value[key]).filter(item => typeof item === 'string').join(' ').toLowerCase();
+  if (/(?:insufficient|exhausted|depleted|exceeded|not[_ -]*enough)[_ -]*(?:credits?|points?|balance|quota)|(?:credits?|points?|balance|quota)[_ -]*(?:insufficient|exhausted|depleted|exceeded|not[_ -]*enough)|(?:积分|余额|额度).{0,12}(?:不足|耗尽|用完)/i.test(evidence))
+    return 'LULULAB_CREDITS_INSUFFICIENT';
+  for (const key of ['error', 'errors', 'detail', 'body']) {
+    const nested = value[key];
+    if (Array.isArray(nested)) {
+      if (nested.some(item => remoteErrorCode(item, depth + 1))) return 'LULULAB_CREDITS_INSUFFICIENT';
+    } else if (remoteErrorCode(nested, depth + 1)) return 'LULULAB_CREDITS_INSUFFICIENT';
+  }
+  return null;
+}
 
 // Media metadata is distinct from the Content-Type required by a signed upload.
 // Inspect bytes rather than trusting an extension or a generic storage MIME type.
@@ -41,7 +58,7 @@ export async function resolveApiKey(env = process.env, home = homedir()) {
     if (error.code !== 'ENOENT') throw new LuluLabError('无法读取 LuluLab 本地凭证配置。');
   }
   if (typeof config?.apiKey === 'string' && config.apiKey.trim()) return config.apiKey.trim();
-  throw new LuluLabError('缺少 LuluLab API Key；请在本机配置 LULULAB_API_KEY。');
+  throw new LuluLabError('缺少 LuluLab API Key；请在本机配置 LULULAB_API_KEY。', 'LULULAB_KEY_MISSING');
 }
 
 function webUrl(value, label) {
@@ -61,7 +78,7 @@ export class LuluLabClient {
     this.base = webUrl(baseUrl, 'API');
     if (this.base.search || this.base.hash || !['', '/'].includes(this.base.pathname))
       throw new LuluLabError('API 地址必须是服务根地址。');
-    if (!apiKey?.trim()) throw new LuluLabError('缺少 LuluLab API Key。');
+    if (!apiKey?.trim()) throw new LuluLabError('缺少 LuluLab API Key。', 'LULULAB_KEY_MISSING');
     this.key = apiKey.trim();
     this.fetch = fetchImpl;
     this.timeoutMs = timeoutMs;
@@ -79,12 +96,28 @@ export class LuluLabClient {
     } catch {
       throw new LuluLabError(method === 'POST' && path === '/tasks'
         ? 'LuluLab 提交响应未确认；任务可能已创建，禁止自动重提。'
-        : 'LuluLab API 网络错误或超时。');
+        : 'LuluLab API 网络错误或超时。', method === 'POST' && path === '/tasks'
+          ? 'LULULAB_SUBMISSION_UNCERTAIN' : 'LULULAB_NETWORK_ERROR');
     }
     // Do not print server response text, which could contain private data.
-    if (!response.ok) throw new LuluLabError(`LuluLab API HTTP ${response.status}。${path === '/tasks' && method === 'POST' ? '禁止自动重提。' : ''}`);
-    try { return await response.json(); }
-    catch { throw new LuluLabError('LuluLab API 返回无效 JSON；提交任务时禁止自动重提。'); }
+    if (!response.ok) {
+      let envelope = null;
+      try { envelope = await response.json(); } catch { /* Never surface raw response. */ }
+      const code = remoteErrorCode(envelope) || ([401, 403].includes(response.status) ? 'LULULAB_KEY_INVALID' : 'LULULAB_HTTP_ERROR');
+      throw new LuluLabError(code === 'LULULAB_CREDITS_INSUFFICIENT'
+        ? 'LuluLab 积分不足。' : code === 'LULULAB_KEY_INVALID'
+          ? 'LuluLab API Key 无效或无权限。' : `LuluLab API HTTP ${response.status}。`, code);
+    }
+    try {
+      const value = await response.json();
+      if (remoteErrorCode(value)) throw new LuluLabError('LuluLab 积分不足。', 'LULULAB_CREDITS_INSUFFICIENT');
+      return value;
+    }
+    catch (error) {
+      if (error instanceof LuluLabError) throw error;
+      throw new LuluLabError('LuluLab API 返回无效 JSON；提交任务时禁止自动重提。',
+        method === 'POST' && path === '/tasks' ? 'LULULAB_SUBMISSION_UNCERTAIN' : 'LULULAB_CLI_FAILED');
+    }
   }
 
   async upload(file) {
@@ -197,7 +230,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   main().catch(error => {
     // Error messages are controlled by this module; filesystem errors can include paths.
     const diagnostic = error instanceof LuluLabError ? error.message : 'LuluLab Node.js invocation failed';
-    const errorCode = args => args[0] === 'task' && args[1] === 'submit'
+    const errorCode = args => error instanceof LuluLabError && error.code !== 'LULULAB_CLI_FAILED' ? error.code : args[0] === 'task' && args[1] === 'submit'
       ? 'LULULAB_SUBMISSION_UNCERTAIN' : 'LULULAB_CLI_FAILED';
     process.stderr.write(JSON.stringify({ ok: false, errorCode: errorCode(process.argv.slice(2)), diagnostic }) + '\n');
     process.exitCode = 1;

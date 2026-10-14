@@ -95,7 +95,7 @@ test('ambiguous submissions never retry or disclose response details', async () 
     error.message.includes('禁止自动重提') && !error.message.includes('fake-key'));
   assert.equal(calls, 1);
   const bad = new LuluLabClient({ apiKey: 'fake-key', fetchImpl: async () => new Response('fake-key', { status: 401 }) });
-  await assert.rejects(() => bad.task('id'), /HTTP 401/);
+  await assert.rejects(() => bad.task('id'), error => error.code === 'LULULAB_KEY_INVALID' && !error.message.includes('fake-key'));
 });
 
 test('credential precedence and URL transport restrictions', async () => {
@@ -128,7 +128,7 @@ test('Python adapter drives portable Node CLI end to end', async () => {
   try {
     const file = join(root, 'product.png'); await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     const scriptDir = fileURLToPath(new URL('../scripts/', import.meta.url));
-    const code = `import sys,json\nsys.path.insert(0,sys.argv[1])\nimport video_cli,local_video_generate\nassert video_cli.preflight('seedance-2-fast')['selected']=='lululab_cli'\nassert video_cli.get_lululab_credit_balance()==30\ntask=video_cli.submit_local_video('lululab_cli','seedance-2-fast','test',15,reference_files=[sys.argv[2]])\nresult=video_cli.poll_local_video('lululab_cli',task)\nassert local_video_generate.media_url(result).endswith('/video.mp4')\nprint(task)\n`;
+    const code = `import sys,json\nsys.path.insert(0,sys.argv[1])\nimport video_cli,local_video_generate\nassert video_cli.preflight('seedance-2-fast', 'lululab_cli')['selected']=='lululab_cli'\nassert video_cli.get_lululab_credit_balance()==30\ntask=video_cli.submit_local_video('lululab_cli','seedance-2-fast','test',15,reference_files=[sys.argv[2]])\nresult=video_cli.poll_local_video('lululab_cli',task)\nassert local_video_generate.media_url(result).endswith('/video.mp4')\nprint(task)\n`;
     const env = { ...process.env, LULULAB_API_KEY: 'fake-key', LULULAB_API_BASE_URL: `http://127.0.0.1:${server.address().port}`,
       LULULAB_NODE: process.execPath, LULULAB_CLI: fileURLToPath(new URL('../scripts/lululab_cli.mjs', import.meta.url)),
       PYTHONDONTWRITEBYTECODE: '1' };

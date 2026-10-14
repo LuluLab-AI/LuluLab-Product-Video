@@ -42,14 +42,14 @@ class LibTVBatchTests(unittest.TestCase):
         self.assertEqual(left, ["product-key", "creator-key"])
         self.assertNotIn("--run", arguments)
 
-    def test_parallel_runner_is_bounded_to_three(self):
+    def test_segments_run_sequentially(self):
         client = ParallelClient()
         completed, errors = libtv_batch_generate.run_nodes_parallel(
             client, "project", {index: f"node-{index}" for index in range(1, 6)}
         )
         self.assertFalse(errors)
         self.assertEqual(set(completed), {1, 2, 3, 4, 5})
-        self.assertLessEqual(client.maximum, 3)
+        self.assertEqual(client.maximum, 1)
 
     def test_node_index_rejects_duplicate_names(self):
         with self.assertRaises(libtv_batch_generate.LibTVBatchError):

@@ -80,14 +80,21 @@ def main() -> int:
         if not task_id:
             balance = video_cli.get_lululab_credit_balance()
             if balance <= 0:
-                raise CreatorImageError("LuluLab 积分不足，未提交图片任务。")
+                state.update(status='credits_required')
+                atomic_write(report, state)
+                raise video_cli.CreditsInsufficient(video_cli.CREDITS_MESSAGE)
             uploaded = video_cli.upload_lululab_image_references(references)
             state = {"status": "submit_started_uncertain", "taskId": "", "provider": "lululab_cli",
                      "model": args.image_model, "promptSha256": digest,
                      "referenceFiles": list(map(str, references)), "output": str(output)}
             atomic_write(report, state)
-            task_id = video_cli.submit_lululab_image(prompt, uploaded_references=uploaded,
-                                                     model=args.image_model)
+            try:
+                task_id = video_cli.submit_lululab_image(prompt, uploaded_references=uploaded,
+                                                         model=args.image_model)
+            except video_cli.CreditsInsufficient:
+                state.update(status='credits_required')
+                atomic_write(report, state)
+                raise
             state.update(status="submitted", taskId=task_id)
             atomic_write(report, state)
         try:

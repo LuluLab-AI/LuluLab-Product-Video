@@ -17,9 +17,10 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.user_errors import failure
+from model_catalog import DEFAULT_MODEL, MODEL_CATALOG, model_id_for, validate_durations
 
 
-PROVIDER_ORDER = ("lululab_cli",)
+PROVIDER_ORDER = ("lululab_cli", "libtv_cli", "xiaoyunque_cli", "dreamina_cli")
 SUPPORTED_PROVIDERS = ("lululab_cli", "dreamina_cli", "libtv_cli", "xiaoyunque_cli")
 LOCAL_PROVIDERS = {"lululab_cli", "xiaoyunque_cli", "dreamina_cli"}
 LOGICAL_MODELS = {
@@ -38,7 +39,7 @@ LULULAB_VIDEO_WORKFLOW_ID = "VideoGenV2"
 LULULAB_IMAGE_WORKFLOW_ID = "ImageGenV2"
 LULULAB_IMAGE_MODEL_ID = "gpt-image-2-5-sunburst"
 LULULAB_IMAGE_MODEL_IDS = {LULULAB_IMAGE_MODEL_ID, "gpt-image-2-5-flare"}
-LULULAB_MODEL_IDS = {"seedance-2-fast", "seedance-2-mini", "seedance-2", "seedance-2-5"}
+LULULAB_MODEL_IDS = set(MODEL_CATALOG) - {"none"}
 LIBTV_MODEL_NAMES = {
     "seedance-2-fast": "Seedance 2.0 Fast VIP",
     "seedance-2-mini": "Seedance 2.0 Mini",
@@ -56,22 +57,40 @@ class VideoCliError(RuntimeError):
     pass
 
 
+CREDITS_MESSAGE = 'LULULAB_CREDITS_INSUFFICIENT：积分不足，已停止新的计费提交。请登录 https://www.lululab.ai/，在站内 Recharge Credits 充值；完成后重新检查并继续当前任务。'
+KEY_MESSAGE = '当前步骤需要 LuluLab API Key。请登录 https://www.lululab.ai/，在站内 API Keys 获取，并安全配置到本机；不要在聊天中粘贴 Key。'
+
+
+class CreditsInsufficient(VideoCliError):
+    pass
+
+
 def normalize_model(model: str) -> str:
     normalized = " ".join(
         str(model).lower().replace("_", " ").replace("-", " ").replace(".", " ").split()
     )
-    value = LOGICAL_MODELS.get(normalized, str(model).strip().lower())
-    if value not in PROVIDER_MODEL_IDS:
-        raise VideoCliError(f"不支持的视频模型：{model}")
-    return value
+    value = LOGICAL_MODELS.get(normalized, str(model).strip())
+    try:
+        model_id = model_id_for(value)
+    except ValueError as exc:
+        raise VideoCliError(str(exc)) from exc
+    if model_id == "none":
+        raise VideoCliError("none 仅用于不生成视频的任务。")
+    return model_id
 
 
 def provider_model_id(model: str) -> str:
-    return PROVIDER_MODEL_IDS[normalize_model(model)]
+    model_id = normalize_model(model)
+    if model_id not in PROVIDER_MODEL_IDS:
+        raise VideoCliError(f"当前渠道不支持视频模型：{model_id}")
+    return PROVIDER_MODEL_IDS[model_id]
 
 
 def libtv_model_name(model: str) -> str:
-    return LIBTV_MODEL_NAMES[normalize_model(model)]
+    model_id = normalize_model(model)
+    if model_id not in LIBTV_MODEL_NAMES:
+        raise VideoCliError(f"LibTV 适配器尚不支持视频模型：{model_id}")
+    return LIBTV_MODEL_NAMES[model_id]
 
 
 def validate_duration(model: str, duration: int | float | str) -> int:
@@ -80,9 +99,10 @@ def validate_duration(model: str, duration: int | float | str) -> int:
         value = int(float(str(duration)))
     except (TypeError, ValueError):
         raise VideoCliError("视频时长必须是整数。") from None
-    maximum = 30 if model_id == "seedance-2-5" else 15
-    if value < 4 or value > maximum:
-        raise VideoCliError(f"模型 {model_id} 的单段时长必须是 4-{maximum} 秒。")
+    try:
+        validate_durations(model_id, [value], value)
+    except ValueError as exc:
+        raise VideoCliError(str(exc)) from exc
     return value
 
 
@@ -199,6 +219,18 @@ def _parse_json(raw: str, provider: str) -> Any:
 def _run_json(executable: Path, arguments: Sequence[str], *, provider: str, timeout: float = 600.0) -> Any:
     completed = _run_process(executable, arguments, timeout=timeout)
     if completed.returncode != 0:
+        if provider == 'lululab_cli':
+            try:
+                code = json.loads(completed.stderr).get('errorCode')
+            except (ValueError, AttributeError):
+                code = None
+            if code == 'LULULAB_CREDITS_INSUFFICIENT':
+                raise CreditsInsufficient(CREDITS_MESSAGE)
+            if code in {'LULULAB_KEY_MISSING', 'LULULAB_KEY_INVALID'}:
+                raise VideoCliError(KEY_MESSAGE)
+            if code == 'LULULAB_SUBMISSION_UNCERTAIN':
+                raise VideoCliError('LULULAB_SUBMISSION_UNCERTAIN：提交状态不确定，禁止自动重提。')
+            raise VideoCliError('LuluLab CLI 或网络故障；请检查连接并保留已有任务 ID。')
         detail = completed.stderr.strip() or completed.stdout.strip() or "未知错误"
         if "login" in detail.lower() or "unauthor" in detail.lower():
             raise VideoCliError(f"{provider} CLI 尚未登录：{detail[:1000]}")
@@ -242,6 +274,8 @@ def local_cli_supports_model(provider: str, model: str) -> bool:
             and all(token in submit_text for token in required)
             and "--id" in fetch_text
         )
+    if normalize_model(model) not in PROVIDER_MODEL_IDS:
+        return False
     try:
         executable = _local_executable(provider)
         submit_help = _run_process(executable, ["multimodal2video", "--help"], timeout=30)
@@ -260,17 +294,25 @@ def local_cli_supports_model(provider: str, model: str) -> bool:
     )
 
 
-def preflight(model: str, provider: str = "lululab_cli") -> dict[str, Any]:
-    """Check only the authorized provider; never switch channels implicitly."""
+def preflight(model: str, provider: str = "auto") -> dict[str, Any]:
+    """Select the first usable CLI before submission, then lock the job to it."""
     normalized = normalize_model(model)
-    if provider not in SUPPORTED_PROVIDERS:
+    if provider != "auto" and provider not in SUPPORTED_PROVIDERS:
         raise VideoCliError(f"不支持的视频渠道：{provider}")
-    available = libtv_cli_available() if provider == "libtv_cli" else local_cli_supports_model(provider, normalized)
-    executable = (resolve_libtv_cli() if provider == "libtv_cli" else _local_executable(provider)) if available else None
+    priority = PROVIDER_ORDER if provider == "auto" else (provider,)
+    availability: dict[str, bool | None] = {name: None for name in SUPPORTED_PROVIDERS}
+    selected = None
+    for candidate in priority:
+        available = (normalized in LIBTV_MODEL_NAMES and libtv_cli_available()) if candidate == "libtv_cli" else local_cli_supports_model(candidate, normalized)
+        availability[candidate] = available
+        if available:
+            selected = candidate
+            break
+    executable = (resolve_libtv_cli() if selected == "libtv_cli" else _local_executable(selected)) if selected else None
     return {
-        "priority": [provider],
-        "selected": provider if available else None,
-        "availability": {name: available if name == provider else None for name in SUPPORTED_PROVIDERS},
+        "priority": list(priority),
+        "selected": selected,
+        "availability": availability,
         "executable": str(executable) if executable else "",
         "model": normalized,
         "lowerPriorityChecksSkipped": True,
@@ -542,7 +584,7 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     command = subparsers.add_parser("preflight")
     command.add_argument("--model", required=True)
-    command.add_argument("--provider", choices=SUPPORTED_PROVIDERS, default="lululab_cli")
+    command.add_argument("--provider", choices=("auto", *SUPPORTED_PROVIDERS), default="auto")
     args = parser.parse_args()
     if args.command == "preflight":
         try:

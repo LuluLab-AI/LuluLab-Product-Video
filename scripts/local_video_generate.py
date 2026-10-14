@@ -110,7 +110,7 @@ def main() -> int:
         data = load_job(job_path)
         from quality_gate import validate_job
         validate_job(data)  # Before provider checks, uploads or billable submission.
-        model = str(data.get("videoModel", "seedance-2-fast"))
+        model = str(data.get("videoModel", video_cli.DEFAULT_MODEL))
         if not video_cli.local_cli_supports_model(args.provider, model):
             raise LocalGenerationError(f"{args.provider} 未通过当前模型的精确 CLI 能力检查。")
         state_path = root / "local-video-generation.json"
@@ -123,12 +123,6 @@ def main() -> int:
             and (segments.get(str(int(segment["segmentId"]))) or {}).get("status") != "succeeded"
             for segment in data["segments"]
         )
-        if args.provider == "lululab_cli" and needs_submission:
-            balance = video_cli.get_lululab_credit_balance()
-            state["creditsBefore"] = balance
-            atomic_write_json(state_path, state)
-            if balance <= 0:
-                raise LocalGenerationError("LuluLab积分余额不足，未提交计费任务。")
         for segment in data["segments"]:
             segment_id = int(segment["segmentId"])
             key = str(segment_id)
@@ -139,19 +133,28 @@ def main() -> int:
                 raise LocalGenerationError(f"Segment {segment_id} 提交状态不确定；为避免重复计费，禁止自动重提。")
             task_id = str(record.get("taskId", "")).strip()
             if not task_id:
+                if args.provider == 'lululab_cli':
+                    balance = video_cli.get_lululab_credit_balance()
+                    if balance <= 0:
+                        record['status'] = 'credits_required'
+                        segments[key] = record
+                        atomic_write_json(state_path, state)
+                        raise video_cli.CreditsInsufficient(video_cli.CREDITS_MESSAGE)
                 references = [str(Path(str(item)).expanduser().resolve()) for item in segment.get("referenceFiles", [])]
                 record.update({"status": "submit_started_uncertain", "referenceFiles": references})
                 segments[key] = record
                 atomic_write_json(state_path, state)
-                task_id = video_cli.submit_local_video(
-                    args.provider,
-                    model,
-                    str(segment["prompt"]),
-                    segment["duration"],
-                    reference_files=references,
-                    aspect_ratio=str(data.get("aspectRatio", "9:16")),
-                    resolution=str(data.get("resolution", "720p")),
-                )
+                try:
+                    task_id = video_cli.submit_local_video(
+                        args.provider, model, str(segment['prompt']), segment['duration'],
+                        reference_files=references,
+                        aspect_ratio=str(data.get('aspectRatio', '9:16')),
+                        resolution=str(data.get('resolution', '720p')),
+                    )
+                except video_cli.CreditsInsufficient:
+                    record['status'] = 'credits_required'
+                    atomic_write_json(state_path, state)
+                    raise
                 record.update({"taskId": task_id, "status": "submitted"})
                 atomic_write_json(state_path, state)
             record["status"] = "querying"

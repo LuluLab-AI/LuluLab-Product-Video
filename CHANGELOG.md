@@ -1,5 +1,13 @@
 # Changelog
 
+## v8.0.0 — 2026-10-14
+
+- Publish the LuluLab-first UGC and story video workflow, with SalesVideoPromptV2 prompts, ImageGenV2 creator references, and VideoGenV2 as the default video path.
+- Validate capability before video submission; preserve provider and task ID after submission.
+- Support one to ten videos, sequential segments per video, three concurrent workflows, and final assembly.
+- Replace local creative generation and knowledge retrieval with server-side creative prompts and local output validation.
+- Refresh Skill metadata and English and Chinese installation guides.
+
 ## v6.2.2 — 2026-10-10 (release candidate)
 
 - Add synchronized English and Chinese GitHub installation guides and GPL-3.0-only licensing.

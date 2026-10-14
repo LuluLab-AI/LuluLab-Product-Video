@@ -1,4 +1,4 @@
 interface:
-  display_name: "Product Video Local"
-  short_description: "Create one or multiple product videos using local knowledge"
-  default_prompt: "Use $ugc-product-video to create product videos from my images, automatically planning the creative and using LuluLab CLI for creator images and Seedance video by default."
+  display_name: "LuluLab 带货视频"
+  short_description: "用 LuluLab 从商品图制作原创 UGC 或剧情带货视频"
+  default_prompt: "使用 $LuluLab-Product-Video，根据我的产品图生成带货视频。"

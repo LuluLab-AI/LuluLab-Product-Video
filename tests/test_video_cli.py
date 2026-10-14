@@ -67,6 +67,7 @@ class VideoCliTests(unittest.TestCase):
             product.write_bytes(b"product")
             creator.write_bytes(b"creator")
             for model in sorted(video_cli.LULULAB_MODEL_IDS):
+                duration = 8 if model in {"google-omni", "google-veo"} else 15
                 with self.subTest(model=model), patch.object(video_cli, "local_cli_supports_model", return_value=True), patch.object(
                     video_cli, "_local_executable", return_value=Path("/tmp/lululab")
                 ), patch.object(video_cli, "resolve_lululab_api_key", return_value="test-key"), patch.dict(
@@ -76,7 +77,7 @@ class VideoCliTests(unittest.TestCase):
                     {"data": {"url": "https://example.test/creator", "expiresAt": "later"}},
                     {"data": {"result": {"id": "task-1"}}},
                 ]) as run:
-                    task = video_cli.submit_local_video("lululab_cli", model, "prompt", 15,
+                    task = video_cli.submit_local_video("lululab_cli", model, "prompt", duration,
                                                       reference_files=[product, creator, product])
                     self.assertEqual(task, "task-1")
                     self.assertEqual(run.call_count, 3)
@@ -85,7 +86,7 @@ class VideoCliTests(unittest.TestCase):
                     args = run.call_args.args[1]
                     self.assertEqual(args[:4], ["task", "submit", "--workflow-id", "VideoGenV2"])
                     payload = json.loads(args[args.index("--input") + 1])
-                    self.assertEqual(payload, {"model": model, "prompt": "prompt", "duration": 15,
+                    self.assertEqual(payload, {"model": model, "prompt": "prompt", "duration": duration,
                         "aspectRatio": "9:16", "resolution": "720p", "referenceImages": [
                             {"url": "https://example.test/product", "mimeType": "image/png", "expiredAt": "later"},
                             {"url": "https://example.test/creator", "mimeType": "image/jpeg", "expiredAt": "later"}]})
@@ -116,17 +117,17 @@ class VideoCliTests(unittest.TestCase):
                 self.assertEqual(run.call_args.args[1][0], "upload")
 
     def test_provider_order(self):
-        self.assertEqual(video_cli.PROVIDER_ORDER, ("lululab_cli",))
+        self.assertEqual(video_cli.PROVIDER_ORDER, ("lululab_cli", "libtv_cli", "xiaoyunque_cli", "dreamina_cli"))
 
-    def test_preflight_defaults_to_lululab_without_other_provider_probe(self):
+    def test_preflight_prefers_lululab_and_skips_later_probes(self):
         with patch.object(video_cli, "libtv_cli_available") as libtv, patch.object(
             video_cli, "_local_executable", return_value=Path("/tmp/lululab")
-        ), patch.object(video_cli, "local_cli_supports_model", return_value=True) as selected:
+        ), patch.object(video_cli, "local_cli_supports_model", return_value=True) as checked:
             result = video_cli.preflight("Seedance 2 Fast")
         self.assertEqual(result["selected"], "lululab_cli")
         self.assertIsNone(result["availability"]["xiaoyunque_cli"])
         libtv.assert_not_called()
-        selected.assert_called_once()
+        checked.assert_called_once_with("lululab_cli", "seedance-2-fast")
 
     def test_explicit_xiaoyunque_is_checked_alone(self):
         with patch.object(video_cli, "libtv_cli_available") as libtv, patch.object(
@@ -137,15 +138,14 @@ class VideoCliTests(unittest.TestCase):
         self.assertIsNone(result["availability"]["dreamina_cli"])
         libtv.assert_not_called()
 
-    def test_unavailable_lululab_never_falls_back(self):
-        with patch.object(video_cli, "libtv_cli_available") as libtv, patch.object(
-            video_cli, "local_cli_supports_model", return_value=False
-        ) as selected:
+    def test_libtv_is_first_fallback(self):
+        with patch.object(video_cli, "libtv_cli_available", return_value=True), patch.object(
+            video_cli, "resolve_libtv_cli", return_value=Path("/tmp/libtv")
+        ), patch.object(video_cli, "local_cli_supports_model", return_value=False) as checked:
             result = video_cli.preflight("seedance-2-fast")
-        self.assertIsNone(result["selected"])
+        self.assertEqual(result["selected"], "libtv_cli")
         self.assertIsNone(result["availability"]["xiaoyunque_cli"])
-        libtv.assert_not_called()
-        selected.assert_called_once_with("lululab_cli", "seedance-2-fast")
+        checked.assert_called_once_with("lululab_cli", "seedance-2-fast")
 
     def test_libtv_default_install_is_detected(self):
         with tempfile.TemporaryDirectory() as directory:
