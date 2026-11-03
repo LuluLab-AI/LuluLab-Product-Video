@@ -1,4 +1,4 @@
 interface:
   display_name: "LuluLab 带货视频"
-  short_description: "工作流从商品图生成带货视频，支持自定义创作需求和 AI 或用户达人图"
+  short_description: "与网站共用调度器，从商品图完成脚本策划、分段视频生成和拼接"
   default_prompt: "使用 $LuluLab-Product-Video，根据我的产品图生成带货视频。"
