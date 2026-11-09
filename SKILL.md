@@ -1,13 +1,13 @@
 ---
 name: LuluLab-Product-Video
 slug: lululab-product-video
-version: 9.2.2
-displayName: LuluLab-Product-Video
+version: 9.2.3
+displayName: LuluLab 批量带货视频
 summary: Create product sales videos with LuluLab Customer and Dispatcher workflows.
 homepage: https://github.com/LuluLab-AI/LuluLab-Product-Video
 description: 根据商品图生成带货视频，通过与前端一致的 SalesVideoPromptV3 和 VideoCreationV1 调度器任务完成策划、分段生成与拼接。
 metadata:
-  version: "9.2.2"
+  version: "9.2.3"
 license: GPL-3.0-only
 ---
 
