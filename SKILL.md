@@ -1,8 +1,13 @@
 ---
 name: LuluLab-Product-Video
+slug: lululab-product-video
+version: 9.2.2
+displayName: LuluLab-Product-Video
+summary: Create product sales videos with LuluLab Customer and Dispatcher workflows.
+homepage: https://github.com/LuluLab-AI/LuluLab-Product-Video
 description: 根据商品图生成带货视频，通过与前端一致的 SalesVideoPromptV3 和 VideoCreationV1 调度器任务完成策划、分段生成与拼接。
 metadata:
-  version: "v9.2.1"
+  version: "9.2.2"
 license: GPL-3.0-only
 ---
 
@@ -39,6 +44,8 @@ license: GPL-3.0-only
 
 策划输出须包含每条完整 videoPrompt 的 summary、prompt、匹配的 duration；多条须编号连续且内容不同。适配器验证后原样提交完整 prompt。失败或结构不符时停止，不自动重做付费策划。最终展示每条父任务 ID、实际状态、下载文件和失败原因。未观看成片不宣称视觉与口播已通过审查。
 
+同一次生成或批量重试必须先合计本次全部图片/视频费用并核对**可用积分（扣除已冻结额度）**，不足时整批停止。生成阶段使用 `/tasks/batch`，由服务端一次性冻结整批积分，禁止循环调用 `/tasks` 或积分不足后自动缩减数量。保留整批 quoteId 与全部任务 ID；网络响应未知时核对原状态，不自动重提。相关实现为 `scripts/credit_batch.mjs` 和 `scripts/dispatcher_commerce.mjs`。
+
 ## 通用执行合同
 
 网站与 Skill 共用 Customer/Dispatcher 后端：一次 `SalesVideoPromptV3` 批量策划，每条完整脚本对应一个 `VideoCreationV1` 父任务。服务端运行 `VideoSegmentPlanV1 → VideoGenV2 → 时长检查／必要裁剪 → 多段拼接`；分段并发与 provider 路由由服务端管理。Skill 不运行本地知识检索、ChatGenV2 母提示词、额外 AI 达人图、外部 CLI 渠道预检或本地分段生成与拼接。旧脚本只服务已有旧任务的恢复。
@@ -63,7 +70,7 @@ license: GPL-3.0-only
 
 ## 调度器执行
 
-需要 Node.js ≥20。从当前 SKILL.md 所在目录解析脚本，支持 Windows/macOS/Linux，无需 npm。凭证继续使用本 skill 已有的环境变量与私有配置；不在命令参数、提示词或日志中放 Key。默认 Customer API 为 `https://customer.lululab.ai`，可用 `LULULAB_API_BASE_URL` 指定开发环境。
+需要 Node.js ≥20。从当前 SKILL.md 所在目录解析脚本，支持 Windows/macOS/Linux，无需 npm。凭证继续使用本 skill 已有的环境变量与私有配置；不在命令参数、提示词或日志中放 Key。未配置或无效 Key 时，用交互语言提示用户前往 https://www.lululab.ai/workshop/keys 获取 API Key，并在本机安全配置 `LULULAB_API_KEY`；不要让用户在聊天中粘贴 Key。已有有效 Key 时不重复提示。默认 Customer API 为 `https://customer.lululab.ai`，可用 `LULULAB_API_BASE_URL` 指定开发环境。
 
 收到产品图后识别可见商品事实；缺图时请求产品图。价格、优惠、功效、认证等只使用用户提供或素材有依据的信息。目标市场默认美国、发布语言默认 en-US；默认值只用于准备待确认配置。
 
@@ -116,11 +123,11 @@ node <技能根目录>/scripts/dispatcher_commerce.mjs advance --state state.jso
 node <技能根目录>/scripts/dispatcher_commerce.mjs download --state state.json --output <交付目录>
 ```
 
-上传所有产品图和用户提供的达人图，把上传返回的 `{url,mimeType,expiredAt?}` 对象写入请求。`plan` 离线校验和展示实际请求，不读取 Key 或创建任务。`estimate` 查询 1 次策划及全部视频的总预估积分（超过 10 条时按每项最多 10 条拆分估算），不创建任务。`submit` 只创建策划任务；保存 state 后按需 `poll`，策划成功后 `advance` 逐个提交生成任务。等待生成期间继续 `poll`；它只查询，不会提交。每次 `advance` 只提交缺失的任务，已有 ID（含失败任务）不会重提。完成后下载成功结果，保留部分成功与所有失败信息。
+上传所有产品图和用户提供的达人图，把上传返回的 `{url,mimeType,expiredAt?}` 对象写入请求。`plan` 离线校验和展示实际请求，不读取 Key 或创建任务。`estimate` 查询 1 次策划及全部视频的总预估积分（超过 10 条时按每项最多 10 条拆分估算），不创建任务。`submit` 只创建策划任务；保存 state 后按需 `poll`，策划成功后 `advance` 整批提交生成任务。等待生成期间继续 `poll`；它只查询，不会提交。每次 `advance` 只提交缺失的任务，已有 ID（含失败任务）不会重提。完成后下载成功结果，保留部分成功与所有失败信息。
 
 产品图与人物图合计最多 10 张，声音参考最多 10 个，与网页一致。策划和视频任务均提交顶层 editorSnapshot，使用网站的 productAssets、characterAssets、voiceAssets、region、language 等字段；每条视频快照保留 planningTaskId。
 
-每次任务创建都先调用 `/billing/quotes`，再携带 quoteId 调用 `/tasks`，与前端 SDK 一致。视频、图片保存 `saveGeneratedAssets` 及前端来源字段，使用同一账户可关联任务与资产。
+策划创建前按策划及全部视频费用校验可用积分；策划使用 `/billing/quotes` → `/tasks`。策划完成后为所有视频分别报价，再通过 `/tasks/batch` 一次提交全部视频，与前端 SDK 一致。视频、图片保存 `saveGeneratedAssets` 及前端来源字段，使用同一账户可关联任务与资产。
 
 不要自动付费重试、切换 provider、重做整批或在本地改写服务端返回的提示词。state 在 POST 之前落盘，并用文件锁避免并发重复提交。提交结果未知时停止，核对同账户任务历史及精确 input 后人工恢复，不能删除 state 后重提。中断后继续使用原 state；遗留锁须先确认原进程已停止。API Key 无效、积分不足或网络故障分别报告，不回显服务端原始错误中的私人数据。
 

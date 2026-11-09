@@ -58,7 +58,7 @@ class VideoCliError(RuntimeError):
 
 
 CREDITS_MESSAGE = 'LULULAB_CREDITS_INSUFFICIENT：积分不足，已停止新的计费提交。请登录 https://www.lululab.ai/，在站内 Recharge Credits 充值；完成后重新检查并继续当前任务。'
-KEY_MESSAGE = '当前步骤需要 LuluLab API Key。请登录 https://www.lululab.ai/，在站内 API Keys 获取，并安全配置到本机；不要在聊天中粘贴 Key。'
+KEY_MESSAGE = '当前步骤需要 LuluLab API Key。请前往 https://www.lululab.ai/workshop/keys 获取，并安全配置到本机；不要在聊天中粘贴 Key。'
 
 
 class CreditsInsufficient(VideoCliError):
@@ -180,7 +180,7 @@ def resolve_lululab_api_key() -> str:
         if isinstance(key, str) and key.strip():
             return key.strip()
     raise VideoCliError(
-        "缺少LuluLab API Key；请设置 LULULAB_API_KEY，"
+        "缺少LuluLab API Key；请前往 https://www.lululab.ai/workshop/keys 获取并在本机安全配置 LULULAB_API_KEY，"
         "或使用现有 ~/.ugc-product-video/config.json 凭证配置。"
     )
 
@@ -398,6 +398,18 @@ def _task_id(value: Any) -> str:
     return str(identifier).strip()
 
 
+def submit_lululab_video_batch(forms: list[dict[str, Any]]) -> list[str]:
+    """Submit prepared related segments in one atomic server admission."""
+    value = _run_json(_local_executable("lululab_cli"), ["task", "submit-batch", "--input",
+        json.dumps(forms, ensure_ascii=False, separators=(",", ":"))], provider="lululab_cli")
+    if not isinstance(value, list) or len(value) != len(forms):
+        raise VideoCliError("整批响应不完整，请核对已有任务，禁止自动重提。")
+    identifiers = [_task_id(task) for task in value]
+    if len(set(identifiers)) != len(identifiers):
+        raise VideoCliError("整批响应包含重复任务 ID，请核对已有任务。")
+    return identifiers
+
+
 def submit_local_video(
     provider: str,
     model: str,
@@ -446,9 +458,10 @@ def submit_local_video(
 
 def upload_lululab_image_references(
     reference_files: Iterable[str | os.PathLike[str]],
+    *, maximum: int = 9,
 ) -> list[dict[str, str]]:
     """Upload product images before recording an uncertain billable submission."""
-    files = _reference_files(reference_files, 9)
+    files = _reference_files(reference_files, maximum)
     if not files:
         raise VideoCliError("达人图生成需要至少一张产品参考图。")
     executable = resolve_lululab_cli()

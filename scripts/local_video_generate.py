@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 import shutil
@@ -123,6 +124,40 @@ def main() -> int:
             and (segments.get(str(int(segment["segmentId"]))) or {}).get("status") != "succeeded"
             for segment in data["segments"]
         )
+        if args.provider == "lululab_cli" and needs_submission:
+            missing = []
+            forms = []
+            for segment in data["segments"]:
+                key = str(int(segment["segmentId"]))
+                record = segments.get(key, {})
+                if record.get("status") == "submit_started_uncertain":
+                    raise LocalGenerationError("整批提交结果尚未确认，请先核对原有任务，禁止自动重提。")
+                if record.get("taskId") or record.get("status") == "succeeded":
+                    continue
+                references = [str(Path(str(item)).expanduser().resolve()) for item in segment.get("referenceFiles", [])]
+                maximum_images = 30 if video_cli.normalize_model(model) == "seedance-2-5" else 9
+                uploaded = video_cli.upload_lululab_image_references(references, maximum=maximum_images) if references else []
+                forms.append({"workflowId": os.environ.get("LULULAB_VIDEO_WORKFLOW_ID", "").strip() or "VideoGenV2", "input": {
+                    "model": video_cli.normalize_model(model), "prompt": str(segment["prompt"]),
+                    "duration": video_cli.validate_duration(model, segment["duration"]),
+                    "aspectRatio": str(data.get("aspectRatio", "9:16")), "resolution": str(data.get("resolution", "720p")),
+                    "referenceImages": uploaded,
+                }})
+                missing.append(key)
+            if forms:
+                for key in missing:
+                    segments.setdefault(key, {}).update(status="submit_started_uncertain")
+                atomic_write_json(state_path, state)
+                try:
+                    task_ids = video_cli.submit_lululab_video_batch(forms)
+                except video_cli.CreditsInsufficient:
+                    for key in missing:
+                        segments[key]["status"] = "credits_required"
+                    atomic_write_json(state_path, state)
+                    raise
+                for key, task_id in zip(missing, task_ids):
+                    segments[key].update(taskId=task_id, status="submitted")
+                atomic_write_json(state_path, state)
         for segment in data["segments"]:
             segment_id = int(segment["segmentId"])
             key = str(segment_id)
@@ -134,12 +169,7 @@ def main() -> int:
             task_id = str(record.get("taskId", "")).strip()
             if not task_id:
                 if args.provider == 'lululab_cli':
-                    balance = video_cli.get_lululab_credit_balance()
-                    if balance <= 0:
-                        record['status'] = 'credits_required'
-                        segments[key] = record
-                        atomic_write_json(state_path, state)
-                        raise video_cli.CreditsInsufficient(video_cli.CREDITS_MESSAGE)
+                    raise LocalGenerationError("未找到整批提交后的任务 ID；请核对原批次，禁止退回逐段提交。")
                 references = [str(Path(str(item)).expanduser().resolve()) for item in segment.get("referenceFiles", [])]
                 record.update({"status": "submit_started_uncertain", "referenceFiles": references})
                 segments[key] = record
