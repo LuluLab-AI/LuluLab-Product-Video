@@ -1,13 +1,13 @@
 ---
 name: LuluLab-Product-Video
 slug: lululab-product-video
-version: 9.2.3
+version: 9.2.4
 displayName: LuluLab 批量带货视频
 summary: Create product sales videos with LuluLab Customer and Dispatcher workflows.
 homepage: https://github.com/LuluLab-AI/LuluLab-Product-Video
 description: 根据商品图生成带货视频，通过与前端一致的 SalesVideoPromptV3 和 VideoCreationV1 调度器任务完成策划、分段生成与拼接。
 metadata:
-  version: "9.2.3"
+  version: "9.2.4"
 license: GPL-3.0-only
 ---
 
@@ -70,7 +70,7 @@ license: GPL-3.0-only
 
 ## 调度器执行
 
-需要 Node.js ≥20。从当前 SKILL.md 所在目录解析脚本，支持 Windows/macOS/Linux，无需 npm。凭证继续使用本 skill 已有的环境变量与私有配置；不在命令参数、提示词或日志中放 Key。未配置或无效 Key 时，用交互语言提示用户前往 https://www.lululab.ai/workshop/keys 获取 API Key，并在本机安全配置 `LULULAB_API_KEY`；不要让用户在聊天中粘贴 Key。已有有效 Key 时不重复提示。默认 Customer API 为 `https://customer.lululab.ai`，可用 `LULULAB_API_BASE_URL` 指定开发环境。
+需要 Node.js ≥20。从当前 SKILL.md 所在目录解析脚本，支持 Windows/macOS/Linux，无需 npm。凭证继续使用本 skill 已有的环境变量与私有配置；不在命令参数、提示词或日志中放 Key。独立版执行需要调用 API 的步骤时，若 Key 缺失或无效，用交互语言引导用户登录 [LuluLab API Keys 页面](https://www.lululab.ai/workshop/keys) 获取 API Key，并在本机安全配置 `LULULAB_API_KEY`。用户询问如何获取 Key 时也提供此链接。不要让用户在聊天中粘贴 Key。已有有效 Key 时无需主动提醒。默认 Customer API 为 `https://customer.lululab.ai`，可用 `LULULAB_API_BASE_URL` 指定开发环境。
 
 收到产品图后识别可见商品事实；缺图时请求产品图。价格、优惠、功效、认证等只使用用户提供或素材有依据的信息。目标市场默认美国、发布语言默认 en-US；默认值只用于准备待确认配置。
 
